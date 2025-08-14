@@ -1,22 +1,92 @@
 #!/bin/bash
 
-# check if ../ext/cppunit-1.15.1 directory exists, if not clone it
+# check if ../ext/cppunit-1.15.1 directory exists, if not try different approaches based on platform
 if [ ! -d "../ext/cppunit-1.15.1" ]; then
-    echo "cppunit-1.15.1 not found in ../ext/, cloning from GitHub..."
-    mkdir -p ../ext
-    pushd ../ext
-    git -c advice.detachedHead=false clone --branch cppunit-1.15.1 --depth 1 https://anongit.freedesktop.org/git/libreoffice/cppunit.git cppunit-1.15.1
-    if [ $? -ne 0 ]; then
-        echo "Failed to clone with tag cppunit-1.15.1, trying master branch..."
-        git clone --depth 1 https://anongit.freedesktop.org/git/libreoffice/cppunit.git cppunit-1.15.1
-        if [ $? -ne 0 ]; then
-            echo "Failed to clone cppunit repository"
+    echo "cppunit-1.15.1 not found in ../ext/"
+    
+    # Check platform - only use system packages for Linux and Mac
+    if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "Detected Linux/Mac system - checking for system cppunit package..."
+        
+        # Check if system has cppunit development packages
+        if pkg-config --exists cppunit 2>/dev/null; then
+            echo "Found system cppunit package, creating symlink..."
+            mkdir -p ../ext
+            mkdir -p ../ext/cppunit-1.15.1
+            
+            # Create a minimal structure pointing to system cppunit
+            CPPUNIT_INCLUDE=$(pkg-config --variable=includedir cppunit)
+            CPPUNIT_LIB=$(pkg-config --variable=libdir cppunit)
+            
+            echo "System cppunit found at:"
+            echo "  Include: $CPPUNIT_INCLUDE"
+            echo "  Lib: $CPPUNIT_LIB"
+            echo "Skipping build - will use system version"
+            
+            # Create marker file
+            touch ../ext/cppunit-1.15.1/.system_package
+            exit 0
+        else
+            echo "No system cppunit found. Please install it:"
+            if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+                echo "  Ubuntu/Debian: sudo apt-get install libcppunit-dev"
+                echo "  CentOS/RHEL: sudo yum install cppunit-devel"
+                echo "  Fedora: sudo dnf install cppunit-devel"
+            else
+                echo "  macOS: brew install cppunit"
+            fi
+            echo "Then run this script again."
             exit 1
         fi
+    else
+        # Windows or other platforms - use original build approach
+        echo "Detected Windows/other system - building from source..."
+        mkdir -p ../ext
+        pushd ../ext
+        
+        # Try the official GitHub mirror
+        git -c advice.detachedHead=false clone --depth 1 https://github.com/freedesktop/cppunit.git cppunit-1.15.1
+        if [ $? -ne 0 ]; then
+            echo "Failed to clone from GitHub, trying freedesktop..."
+            git -c advice.detachedHead=false clone --depth 1 https://anongit.freedesktop.org/git/libreoffice/cppunit.git cppunit-1.15.1
+            if [ $? -ne 0 ]; then
+                echo "Failed to clone cppunit repository"
+                exit 1
+            fi
+        fi
+        popd
     fi
-    popd
 else
     echo "cppunit-1.15.1 already exists in ../ext/"
+fi
+
+# Check if using system package (Linux/Mac only)
+if [ -f "../ext/cppunit-1.15.1/.system_package" ]; then
+    echo "Using system cppunit package - no build needed"
+    
+    # Create install directory structure for compatibility
+    mkdir -p ../install/cppunit-1.15.1/include
+    mkdir -p ../install/cppunit-1.15.1/lib
+    
+    # Create symlinks to system installation
+    CPPUNIT_INCLUDE=$(pkg-config --variable=includedir cppunit)
+    CPPUNIT_LIB=$(pkg-config --variable=libdir cppunit)
+    
+    if [ -d "$CPPUNIT_INCLUDE/cppunit" ]; then
+        ln -sf "$CPPUNIT_INCLUDE/cppunit" ../install/cppunit-1.15.1/include/cppunit
+    fi
+    
+    # Find the library file
+    if [ -f "$CPPUNIT_LIB/libcppunit.so" ]; then
+        ln -sf "$CPPUNIT_LIB/libcppunit.so" ../install/cppunit-1.15.1/lib/libcppunit.so
+    elif [ -f "$CPPUNIT_LIB/libcppunit.a" ]; then
+        ln -sf "$CPPUNIT_LIB/libcppunit.a" ../install/cppunit-1.15.1/lib/libcppunit.a
+    elif [ -f "$CPPUNIT_LIB/libcppunit.dylib" ]; then
+        ln -sf "$CPPUNIT_LIB/libcppunit.dylib" ../install/cppunit-1.15.1/lib/libcppunit.dylib
+    fi
+    
+    echo "System cppunit setup complete"
+    exit 0
 fi
 
 # check if CMakeLists.txt exists in cppunit, if not create it
@@ -27,7 +97,7 @@ cmake_minimum_required(VERSION 3.10)
 project(cppunit VERSION 1.15.1)
 
 # Options
-option(CPPUNIT_BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(CPPUNIT_BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(CPPUNIT_BUILD_TESTS "Build tests" OFF)
 
 # Set library type
@@ -45,11 +115,92 @@ include_directories(
 
 # Configure header - create config directory if needed
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/config)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit)
+
+# Create config-auto.h (the missing header file)
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit/config-auto.h
+"#ifndef CPPUNIT_CONFIG_AUTO_H
+#define CPPUNIT_CONFIG_AUTO_H
+
+#include <typeinfo>
+
+/* Define to 1 if you have the <dlfcn.h> header file. */
+#define CPPUNIT_HAVE_DLFCN_H 1
+
+/* define if library exports are declared as dll export under win32 */
+#ifdef _WIN32
+#define CPPUNIT_BUILD_DLL 1
+#endif
+
+/* Define to 1 if you have the `finite' function. */
+#define CPPUNIT_HAVE_FINITE 1
+
+/* define if the library defines strstream */
+#define CPPUNIT_HAVE_CLASS_STRSTREAM 0
+
+/* Define if you have the GNU dld library. */
+/* #undef CPPUNIT_HAVE_DLD */
+
+/* Define to 1 if you have the `dlerror' function. */
+#define CPPUNIT_HAVE_DLERROR 1
+
+/* Define to 1 if you have the <dlfcn.h> header file. */
+#define CPPUNIT_HAVE_DLFCN_H 1
+
+/* Define to 1 if you have the `dlopen' function. */
+#define CPPUNIT_HAVE_DLOPEN 1
+
+/* define if the library defines std::isfinite */
+#define CPPUNIT_HAVE_ISFINITE 1
+
+/* Define if you have the libdl library or equivalent. */
+#define CPPUNIT_HAVE_LIBDL 1
+
+/* Define to 1 if you have the `m' library (-lm). */
+#define CPPUNIT_HAVE_LIBM 1
+
+/* Define if you have the shl_load function. */
+/* #undef CPPUNIT_HAVE_SHL_LOAD */
+
+/* define if the library defines sstream */
+#define CPPUNIT_HAVE_SSTREAM 1
+
+/* Define to 1 if you have the <strstream> header file. */
+#define CPPUNIT_HAVE_STRSTREAM 0
+
+/* Name of package */
+#define CPPUNIT_PACKAGE \"cppunit\"
+
+/* Define to the address where bug reports for this package should be sent. */
+#define CPPUNIT_PACKAGE_BUGREPORT \"\"
+
+/* Define to the full name of this package. */
+#define CPPUNIT_PACKAGE_NAME \"cppunit\"
+
+/* Define to the full name and version of this package. */
+#define CPPUNIT_PACKAGE_STRING \"cppunit 1.15.1\"
+
+/* Define to the one symbol short name of this package. */
+#define CPPUNIT_PACKAGE_TARNAME \"cppunit\"
+
+/* Define to the version of this package. */
+#define CPPUNIT_PACKAGE_VERSION \"1.15.1\"
+
+/* Version number of package */
+#define CPPUNIT_VERSION \"1.15.1\"
+
+/* Define to 1 if you have the ANSI C header files. */
+#define CPPUNIT_STDC_HEADERS 1
+
+#endif /* CPPUNIT_CONFIG_AUTO_H */
+")
 
 # Create config.h.cmake
 file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/config/config.h.cmake
 "#ifndef CPPUNIT_CONFIG_H
 #define CPPUNIT_CONFIG_H
+
+#include \"cppunit/config-auto.h\"
 
 #define CPPUNIT_HAVE_SSTREAM 1
 #define CPPUNIT_HAVE_STRSTREAM 0
@@ -78,11 +229,38 @@ file(GLOB_RECURSE CPPUNIT_SOURCES
 # Create the library - use 'cppunit' name (lowercase) to match FindCppUnit expectations
 add_library(cppunit ${CPPUNIT_LIBRARY_TYPE} ${CPPUNIT_SOURCES})
 
-# Set target properties
+# Set compiler flags to handle GCC 13+ compatibility issues
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(cppunit PRIVATE 
+        -fpermissive 
+        -Wno-error
+        -Wno-deprecated-declarations
+        -std=c++14
+        -DCPPUNIT_NO_TESTPLUGIN
+        -ftemplate-backtrace-limit=0
+    )
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(cppunit PRIVATE 
+        -Wno-error
+        -Wno-deprecated-declarations
+        -std=c++14
+    )
+endif()
+
+# Add preprocessor definitions to help with compatibility
+target_compile_definitions(cppunit PRIVATE
+    CPPUNIT_NO_TESTPLUGIN=1
+    _GLIBCXX_USE_CXX11_ABI=0
+)
+
+# Set C++ standard to C++14 which has better compatibility
 set_target_properties(cppunit PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
     OUTPUT_NAME "cppunit"
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
 )
 
 # Include directories for the target
@@ -107,8 +285,10 @@ install(DIRECTORY include/cppunit
     FILES_MATCHING PATTERN "*.h"
 )
 
-# Install config header
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit/config.h
+# Install generated config headers
+install(FILES 
+    ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit/config.h
+    ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit/config-auto.h
     DESTINATION include/cppunit
 )
 
@@ -163,6 +343,7 @@ else
 fi
 
 # build cppunit
+rm -rf ../build/cppunit-1.15.1
 mkdir -p ../build/cppunit-1.15.1
 pushd ../build
 pushd cppunit-1.15.1

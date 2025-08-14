@@ -4,9 +4,9 @@
 if [ ! -d "../ext/cppunit-1.15.1" ]; then
     echo "cppunit-1.15.1 not found in ../ext/"
     
-    # Check platform - only use system packages for Linux and Mac
-    if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "Detected Linux/Mac system - checking for system cppunit package..."
+    # Check platform - use system packages for Linux and macOS, build from source for Windows
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "Detected Linux system - checking for system cppunit package..."
         
         # Check if system has cppunit development packages
         if pkg-config --exists cppunit 2>/dev/null; then
@@ -25,34 +25,54 @@ if [ ! -d "../ext/cppunit-1.15.1" ]; then
             
             # Create marker file
             touch ../ext/cppunit-1.15.1/.system_package
-            exit 0
         else
-            echo "No system cppunit found. Please install it:"
-            if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-                echo "  Ubuntu/Debian: sudo apt-get install libcppunit-dev"
-                echo "  CentOS/RHEL: sudo yum install cppunit-devel"
-                echo "  Fedora: sudo dnf install cppunit-devel"
-            else
-                echo "  macOS: brew install cppunit"
+            echo "ERROR: No system cppunit found. Please install it:"
+            echo "  Ubuntu/Debian: sudo apt-get install libcppunit-dev"
+            echo "  CentOS/RHEL: sudo yum install cppunit-devel"
+            echo "  Fedora: sudo dnf install cppunit-devel"
+            echo "Then run this script again."
+            exit 1
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "Detected macOS system - checking for Homebrew cppunit..."
+        
+        # Check for Homebrew installation of cppunit
+        if command -v brew >/dev/null 2>&1 && brew list cppunit >/dev/null 2>&1; then
+            echo "Found Homebrew cppunit package, creating symlink..."
+            mkdir -p ../ext
+            mkdir -p ../ext/cppunit-1.15.1
+            
+            # Get Homebrew prefix and cppunit paths
+            BREW_PREFIX=$(brew --prefix)
+            CPPUNIT_INCLUDE="$BREW_PREFIX/include"
+            CPPUNIT_LIB="$BREW_PREFIX/lib"
+            
+            echo "Homebrew cppunit found at:"
+            echo "  Include: $CPPUNIT_INCLUDE"
+            echo "  Lib: $CPPUNIT_LIB"
+            echo "Skipping build - will use Homebrew version"
+            
+            # Create marker file
+            touch ../ext/cppunit-1.15.1/.system_package
+        else
+            echo "ERROR: No Homebrew cppunit found. Please install it:"
+            if ! command -v brew >/dev/null 2>&1; then
+                echo "  First install Homebrew: https://brew.sh"
             fi
+            echo "  Then install cppunit: brew install cppunit"
             echo "Then run this script again."
             exit 1
         fi
     else
-        # Windows or other platforms - use original build approach
+        # Windows or other platforms - build from source
         echo "Detected Windows/other system - building from source..."
         mkdir -p ../ext
         pushd ../ext
         
-        # Try the official GitHub mirror
-        git -c advice.detachedHead=false clone --depth 1 https://github.com/freedesktop/cppunit.git cppunit-1.15.1
+        git -c advice.detachedHead=false clone --depth 1 https://anongit.freedesktop.org/git/libreoffice/cppunit.git cppunit-1.15.1
         if [ $? -ne 0 ]; then
-            echo "Failed to clone from GitHub, trying freedesktop..."
-            git -c advice.detachedHead=false clone --depth 1 https://anongit.freedesktop.org/git/libreoffice/cppunit.git cppunit-1.15.1
-            if [ $? -ne 0 ]; then
-                echo "Failed to clone cppunit repository"
-                exit 1
-            fi
+            echo "Failed to clone cppunit repository"
+            exit 1
         fi
         popd
     fi
@@ -60,7 +80,7 @@ else
     echo "cppunit-1.15.1 already exists in ../ext/"
 fi
 
-# Check if using system package (Linux/Mac only)
+# Check if using system package (Linux and macOS)
 if [ -f "../ext/cppunit-1.15.1/.system_package" ]; then
     echo "Using system cppunit package - no build needed"
     
@@ -68,10 +88,18 @@ if [ -f "../ext/cppunit-1.15.1/.system_package" ]; then
     mkdir -p ../install/cppunit-1.15.1/include
     mkdir -p ../install/cppunit-1.15.1/lib
     
-    # Create symlinks to system installation
-    CPPUNIT_INCLUDE=$(pkg-config --variable=includedir cppunit)
-    CPPUNIT_LIB=$(pkg-config --variable=libdir cppunit)
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux: use pkg-config
+        CPPUNIT_INCLUDE=$(pkg-config --variable=includedir cppunit)
+        CPPUNIT_LIB=$(pkg-config --variable=libdir cppunit)
+    else
+        # macOS: use Homebrew paths
+        BREW_PREFIX=$(brew --prefix)
+        CPPUNIT_INCLUDE="$BREW_PREFIX/include"
+        CPPUNIT_LIB="$BREW_PREFIX/lib"
+    fi
     
+    # Create symlinks to system installation
     if [ -d "$CPPUNIT_INCLUDE/cppunit" ]; then
         ln -sf "$CPPUNIT_INCLUDE/cppunit" ../install/cppunit-1.15.1/include/cppunit
     fi
@@ -88,6 +116,9 @@ if [ -f "../ext/cppunit-1.15.1/.system_package" ]; then
     echo "System cppunit setup complete"
     exit 0
 fi
+
+# Only proceed with CMakeLists.txt creation for Windows (not Linux/macOS)
+if [[ "$OSTYPE" != "linux-gnu"* ]] && [[ "$OSTYPE" != "darwin"* ]]; then
 
 # check if CMakeLists.txt exists in cppunit, if not create it
 if [ ! -f "../ext/cppunit-1.15.1/CMakeLists.txt" ]; then
@@ -221,15 +252,22 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/include/cppunit/config.h
 )
 
-# Source files
+# Source files - exclude Windows-specific files on non-Windows platforms
 file(GLOB_RECURSE CPPUNIT_SOURCES
     "src/cppunit/*.cpp"
 )
 
+# Remove Windows-specific files on non-Windows platforms
+if(NOT WIN32)
+    list(FILTER CPPUNIT_SOURCES EXCLUDE REGEX ".*DllMain\\.cpp$")
+    list(FILTER CPPUNIT_SOURCES EXCLUDE REGEX ".*Win32.*")
+    list(FILTER CPPUNIT_SOURCES EXCLUDE REGEX ".*windows.*")
+endif()
+
 # Create the library - use 'cppunit' name (lowercase) to match FindCppUnit expectations
 add_library(cppunit ${CPPUNIT_LIBRARY_TYPE} ${CPPUNIT_SOURCES})
 
-# Set compiler flags to handle GCC 13+ compatibility issues
+# Set compiler flags to handle compatibility issues
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(cppunit PRIVATE 
         -fpermissive 
@@ -239,11 +277,14 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         -DCPPUNIT_NO_TESTPLUGIN
         -ftemplate-backtrace-limit=0
     )
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     target_compile_options(cppunit PRIVATE 
         -Wno-error
         -Wno-deprecated-declarations
         -std=c++14
+        -Wno-unqualified-std-cast-call
+        -Wno-deprecated-builtins
+        -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES=1
     )
 endif()
 
@@ -251,6 +292,7 @@ endif()
 target_compile_definitions(cppunit PRIVATE
     CPPUNIT_NO_TESTPLUGIN=1
     _GLIBCXX_USE_CXX11_ABI=0
+    _LIBCPP_ENABLE_CXX17_REMOVED_FEATURES=1
 )
 
 # Set C++ standard to C++14 which has better compatibility
@@ -342,16 +384,22 @@ else
     echo "CMakeLists.txt already exists in cppunit-1.15.1"
 fi
 
-# build cppunit
-rm -rf ../build/cppunit-1.15.1
-mkdir -p ../build/cppunit-1.15.1
-pushd ../build
-pushd cppunit-1.15.1
-cmake ../../ext/cppunit-1.15.1 \
-  -DCMAKE_INSTALL_PREFIX=../../install/cppunit-1.15.1 \
-  -DCPPUNIT_BUILD_SHARED_LIBS=OFF \
-  --fresh
-cmake --build . --config Debug --parallel
-cmake --install . --config Debug
-popd 
-popd
+fi  # End of Windows platforms check
+
+# build cppunit (only for Windows, not Linux/macOS)
+if [[ "$OSTYPE" != "linux-gnu"* ]] && [[ "$OSTYPE" != "darwin"* ]]; then
+    echo "Building cppunit from source..."
+    mkdir -p ../build/cppunit-1.15.1
+    pushd ../build
+    pushd cppunit-1.15.1
+    cmake ../../ext/cppunit-1.15.1 \
+      -DCMAKE_INSTALL_PREFIX=../../install/cppunit-1.15.1 \
+      -DCPPUNIT_BUILD_SHARED_LIBS=OFF \
+      --fresh
+    cmake --build . --config Debug --parallel
+    cmake --install . --config Debug
+    popd 
+    popd
+else
+    echo "Skipping cppunit build - using system package"
+fi

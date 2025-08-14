@@ -1,0 +1,2 @@
+Error: At line 7: In an Enumeration constant, the value '257' cannot fit in a variable of type 'UInt8'.
+At line 13: The document contained unbalanced tags.

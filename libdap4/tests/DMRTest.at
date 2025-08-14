@@ -1,0 +1,714 @@
+# Process with autom4te to create an -*- Autotest -*- test suite.
+
+AT_INIT([dmr-test])
+
+AT_ARG_OPTION_ARG([baselines],
+    [--baselines=yes|no   Build the baseline file for parser test 'arg'],
+    [echo "baselines set to $at_arg_baselines";
+     baselines=$at_arg_baselines],[baselines=])
+
+# There is no easy way to write a --generate... option for the function expression
+# tests. Better to do it by hand... Use ... .num.func_base as the extension for the
+# baselines.
+ 
+# Usage DMR_PARSE $1 <test_input> $2 <pass/xfail>
+# The baseline is assumed to be $1.baseline
+m4_define([DMR_PARSE], [
+
+    AT_SETUP([parse $1])
+    AT_KEYWORDS([parse])
+    
+    input=$abs_srcdir/$1
+    baseline=$input.baseline
+    
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -p $input], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -p $input || true], [], [stdout], [stderr])
+        AT_CHECK([diff -b -B $baseline stdout || diff -b -B $baseline stderr], [], [ignore],[],[])
+        AT_XFAIL_IF([test "$2" = "xfail"])
+        ])
+    
+    AT_CLEANUP
+])
+
+# Test if the given  CE parses. This was added to test errant CEs to
+# ensure that the parser does not leak CE text into the error messages.
+# jhrg 4/15/20
+#
+# Usage DMR_PARSE_CE $1 <test_input> $2 <ce> $3 <baseline> $4 <pass/xfail>
+# The baseline is assumed to be $1.baseline
+m4_define([DMR_PARSE_CE], [
+
+    AT_SETUP([parse ce $1 $2])
+    AT_KEYWORDS([parse_ce])
+
+    input=$abs_srcdir/dmr-testsuite/$1
+    ce=$2
+    baseline=$abs_srcdir/dmr-testsuite/$3
+
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -p $input -c $ce], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -p $input -c $ce], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > tmp])
+        AT_CHECK([diff -b -B $baseline tmp], [0])
+        AT_XFAIL_IF([test "z$3" = "zxfail"])
+        ])
+
+    AT_CLEANUP
+])
+
+# Usage DMR_TRANS $1 <test_input> $2 <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+m4_define([DMR_TRANS], [
+    # Test transmitting data (i.e., writing the Data DMR to a file and then decoding it)
+    AT_SETUP([trans $1])
+    AT_KEYWORDS([trans])
+    
+    # WORD_ORDER is set by configure in atlocal.
+    # This is a fix for the issue where the CRC32 checksum is different
+    # on little- and big-endian machines, so we use different baseline
+    # files.  jhrg 9/30/15
+        
+    input=$abs_srcdir/dmr-testsuite/$1
+    baseline=$abs_srcdir/dmr-testsuite/$WORD_ORDER/$1.trans_base
+    
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -t $input], [0], [stdout], [ignore])
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input || true], [], [stdout], [stderr])
+        AT_CHECK([diff -b -B $baseline stdout || diff -b -B $baseline stderr], [], [ignore],[],[])
+    
+        AT_XFAIL_IF([test "$2" = "xfail"])
+        ])
+        
+    AT_CLEANUP
+])
+
+# Usage DMR_TRANS_UNIVERSAL $1 <test_input> $2 <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+m4_define([DMR_TRANS_UNIVERSAL], [
+    # Test transmitting data (i.e., writing the Data DMR to a file and then decoding it)
+    AT_SETUP([trans $1])
+    AT_KEYWORDS([trans])
+    
+    # WORD_ORDER is set by configure in atlocal.
+    # This is a fix for the issue where the CRC32 checksum is different
+    # on little- and big-endian machines, so we use different baseline
+    # files.  jhrg 9/30/15
+    
+    input=$abs_srcdir/dmr-testsuite/$1
+    baseline=$abs_srcdir/dmr-testsuite/universal/$1.trans_base
+    
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        echo "The command <>$abs_builddir/dmr-test -C -x -t $input $checksum_filt<>"
+        
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -t $input | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [0], [stdout], [ignore])
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [], [stdout], [ignore])
+        AT_CHECK([diff -b -B $baseline stdout], [], [ignore],[],[])
+    
+        AT_XFAIL_IF([test "$2" = "xfail"])
+        ])
+        
+    AT_CLEANUP
+])
+
+# Usage DMR_TRANS_CE <test_input> <ce> <baseline> <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+m4_define([DMR_TRANS_CE], [
+    # Test transmitting data (i.e., writing the Data DMR to a file and then decoding it)
+    # after applying a constraint expression to the source DMR.
+    AT_SETUP([trans ce $1 $2 $3])
+    AT_KEYWORDS([trans_ce])
+    
+    # See above regarding $WORD_ORDER
+    input=$abs_srcdir/dmr-testsuite/$1
+    baseline=$abs_srcdir/dmr-testsuite/$WORD_ORDER/$3
+
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2"], [], [stdout], []) old version
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2"], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2" || true], [], [stdout], [stderr])
+        AT_CHECK([diff -b -B $baseline stdout || diff -b -B $baseline stderr], [], [ignore],[],[])
+        AT_XFAIL_IF([test "X$4" = "Xxfail"])
+        ])
+    
+    AT_CLEANUP
+])
+
+dnl Given a filename, remove the <Value> element of a DAP4 data response as
+dnl printed by getdap4 so that we dont have issues with comparing data values
+dnl on big- and little-endian machines. The value of the checksum is a function
+dnl of the bytes, so different word orders produce different checksums. jhrg 4/25/18
+dnl
+dnl Ripped from the BES modules/common/handler_tests_macros.m4 file. jhrg 1/22/24
+
+m4_define([REMOVE_DAP4_CHECKSUM], [dnl
+    sed 's@<Value>[[0-9a-f]]\{8\}</Value>@removed checksum@g' < $1 > $1.sed
+    mv $1.sed $1
+])
+
+
+# Usage DMR_TRANS_C_NO_CRC <test_input> <ce> <baseline> <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+# It is different from DMR_TRANS_CE in that it does not include the CRC32
+# checksum so that the test will work for both little- and big-endian machines.
+# jhrg 1/22/24
+m4_define([DMR_TRANS_CE_NO_CRC], [
+    # Test transmitting data (i.e., writing the Data DMR to a file and then decoding it)
+    # after applying a constraint expression to the source DMR.
+    AT_SETUP([trans ce no CRC $1 $2 $3])
+    AT_KEYWORDS([trans_ce])
+
+    input=$abs_srcdir/dmr-testsuite/$1
+    baseline=$abs_srcdir/dmr-testsuite/universal/$3
+
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2"], [], [stdout], []) old version
+
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2"], [ignore], [stdout], [stderr])
+        REMOVE_DAP4_CHECKSUM([stdout])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -c "$2" || true], [], [stdout], [stderr])
+        REMOVE_DAP4_CHECKSUM([stdout])
+        AT_CHECK([diff -b -B $baseline stdout || diff -b -B $baseline stderr], [], [ignore],[],[])
+        AT_XFAIL_IF([test "X$4" = "Xxfail"])
+        ])
+
+    AT_CLEANUP
+])
+
+
+# Usage DMR_TRANS_FUNC_CE <test_input> <func expr> <ce> <baseline> <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+m4_define([DMR_TRANS_FUNC_CE], [
+    # Test transmitting data (i.e., writing the Data DMR to a file and then decoding it)
+    # after applying a function and constraint expression to the source DMR. If either
+    # the function or constraint are empty strings, they will be ignored.
+    AT_SETUP([trans $1 $2 $3 $4])
+    AT_KEYWORDS([trans_func_ce])
+    
+    input=$abs_srcdir/dmr-testsuite/$1
+    fe="$2"
+    ce="$3"
+    baseline=$abs_srcdir/dmr-testsuite/$WORD_ORDER/$4
+
+    AS_IF([test -z "$at_verbose"], [echo "Command: dmr-test -C -x -t $input -f $fe -c $ce"])
+
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -f "$fe" -c "$ce"], [], [stdout], [])
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -f "$fe" -c "$ce"], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -t $input -f "$fe" -c "$ce" || true], [], [stdout], [stderr])
+        AT_CHECK([diff -b -B $baseline stdout || diff -b -B $baseline stderr], [], [ignore],[],[])
+        AT_XFAIL_IF([test "X$5" = "Xxfail"])
+        ])
+
+    AT_CLEANUP
+])
+
+# Usage DMR_TRANS_SERIES_CE <test_input> <ce> <baseline> <pass/xfail>
+# This macro tests CEs using the series values from the Test classes.
+# It's intended to be used to test the filter expressions.
+# 
+# This is a 'universal' test - the baselines do not differ for word order
+# because the checksums are removed. jhrg 5/5/16
+m4_define([DMR_TRANS_SERIES_CE], [
+    AT_SETUP([filter $1 $2 $3])
+    AT_KEYWORDS([filter])
+    
+    input=$abs_srcdir/dmr-testsuite/$1
+    ce="$2"
+    baseline=$abs_srcdir/dmr-testsuite/universal/$3
+    
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -e -t $input -c "$ce" | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [], [stdout], [])
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -e -t $input -c "$ce" | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -e -t $input -c "$ce" | sed 's@<Value>[[0-9a-f]][[0-9a-f]]*</Value>@@' ], [], [stdout], [])
+        AT_CHECK([diff -b -B $baseline stdout], [], [ignore],[],[])
+        AT_XFAIL_IF([test "X$4" = "Xxfail"])
+        ])
+
+    AT_CLEANUP
+])
+
+# Usage DMR_INTERN $1 <test_input> $2 <pass/xfail>
+# This code tests the values printed when the received document is decoded.
+m4_define([DMR_INTERN], [
+    # Test reading/interning data (i.e., using the read() methods to load up objects with
+    # values without running them through serialize/deserialize)
+    AT_SETUP([intern $1])
+    AT_KEYWORDS([intern])
+    
+    # WORD_ORDER is set by configure in atlocal.
+    # This is a fix for the issue where the CRC32 checksum is different
+    # on little- and big-endian machines, so we use different baseline
+    # files.  jhrg 9/30/15
+    input=$abs_srcdir/dmr-testsuite/$1
+    baseline=$abs_srcdir/dmr-testsuite/$WORD_ORDER/$1.intern_base
+
+    AS_IF([test -n "$baselines" -a x$baselines = xyes],
+        [
+        # // old version - sbl 9.4.19
+        # AT_CHECK([$abs_builddir/dmr-test -C -x -i $input], [], [stdout], [])
+        
+        AT_CHECK([$abs_builddir/dmr-test -C -x -i $input], [ignore], [stdout], [stderr])
+        AT_CHECK([cat stdout stderr > $baseline.tmp])
+        ],
+        [
+        AT_CHECK([$abs_builddir/dmr-test -C -x -i $input || true], [], [stdout], [stderr])
+        AT_CHECK([diff -b -B $baseline stdout], [], [ignore], [], [])
+    
+        AT_XFAIL_IF([test "$2" = "xfail"])
+        ])
+        
+    AT_CLEANUP
+])
+
+DMR_PARSE([dmr-testsuite/test_simple_1.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_2.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_3.xml], [pass])
+
+DMR_PARSE([dmr-testsuite/test_simple_3_error_1.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_3_error_2.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_3_error_3.xml], [pass])
+
+DMR_PARSE([dmr-testsuite/test_simple_4.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_5.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_6.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_7.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_8.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_9.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_9.1.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_10.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_enum_grp.xml],[pass])
+
+DMR_PARSE([dmr-testsuite/test_array_1.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_2.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_3.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_4.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_5.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_6.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_7.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_8.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_10.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_11.xml], [pass])
+
+DMR_PARSE([dmr-testsuite/ignore_foreign_xml_1.xml], [pass])
+DMR_PARSE([dmr-testsuite/ignore_foreign_xml_2.xml], [pass])
+DMR_PARSE([dmr-testsuite/ignore_foreign_xml_3.xml], [pass])
+
+# Transmit: Test building and then decoding the response
+# These calls don't include the 'dmr-testsuite' directory because the tests
+# need to choose baselines based on the word order. We could probably re-
+# organize these so that the dir names where here - which I prefer, but
+# the new 'baselines' option makes it far easier to build the baselines, and
+# that was the primary reason for keeping the directory names here and explicit;
+# it made it much easier to sort out what input to use when building a baseline.
+
+DMR_TRANS([test_simple_1.xml], [pass])
+DMR_TRANS([test_simple_2.xml], [pass])
+DMR_TRANS([test_simple_3.xml], [pass])
+DMR_TRANS([test_simple_4.xml], [pass])
+DMR_TRANS([test_simple_5.xml], [pass])
+DMR_TRANS([test_simple_6.xml], [pass])
+DMR_TRANS([test_simple_7.xml], [pass])
+DMR_TRANS([test_simple_8.xml], [pass])
+DMR_TRANS([test_simple_9.xml], [pass])
+DMR_TRANS([test_simple_9.1.xml], [pass])
+DMR_TRANS([test_simple_10.xml], [pass])
+DMR_TRANS([test_enum_grp.xml], [pass])
+
+DMR_TRANS([test_array_1.xml], [pass])
+DMR_TRANS([test_array_2.xml], [pass])
+DMR_TRANS([test_array_3.xml], [pass])
+DMR_TRANS([test_array_4.xml], [pass])
+DMR_TRANS([test_array_5.xml], [pass])
+DMR_TRANS([test_array_6.xml], [pass])
+DMR_TRANS([test_array_7.xml], [pass])
+DMR_TRANS([test_array_8.xml], [pass])
+DMR_TRANS([test_array_10.xml], [pass])
+DMR_TRANS([test_array_11.xml], [pass])
+
+DMR_INTERN([test_simple_1.xml], [pass])
+DMR_INTERN([test_simple_2.xml], [pass])
+DMR_INTERN([test_simple_3.xml], [pass])
+DMR_INTERN([test_simple_4.xml], [pass])
+DMR_INTERN([test_simple_5.xml], [pass])
+DMR_INTERN([test_simple_6.xml], [pass])
+DMR_INTERN([test_simple_7.xml], [pass])
+DMR_INTERN([test_simple_8.xml], [pass])
+DMR_INTERN([test_simple_9.xml], [pass])
+DMR_INTERN([test_simple_9.1.xml], [pass])
+DMR_INTERN([test_simple_10.xml], [pass])
+DMR_INTERN([test_enum_grp.xml], [pass])
+
+DMR_INTERN([test_array_1.xml], [pass])
+DMR_INTERN([test_array_2.xml], [pass])
+DMR_INTERN([test_array_3.xml], [pass])
+DMR_INTERN([test_array_4.xml], [pass])
+DMR_INTERN([test_array_5.xml], [pass])
+DMR_INTERN([test_array_6.xml], [pass])
+DMR_INTERN([test_array_7.xml], [pass])
+DMR_INTERN([test_array_8.xml], [pass])
+DMR_INTERN([test_array_10.xml], [pass])
+DMR_INTERN([test_array_11.xml], [pass])
+
+# Test zero-length arrays. jhrg 1/28/16
+DMR_PARSE([dmr-testsuite/test_array_9.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_12.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_13.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_array_14.xml], [pass])
+
+# Test empty Structures. jhrg 1/29/16
+DMR_PARSE([dmr-testsuite/test_simple_6.2.xml], [pass])
+DMR_PARSE([dmr-testsuite/test_simple_6.3.xml], [pass])
+
+DMR_TRANS([test_array_9.xml], [pass])
+DMR_TRANS([test_array_12.xml], [pass])
+DMR_TRANS([test_array_13.xml], [pass])
+DMR_TRANS([test_array_14.xml], [pass])
+
+DMR_TRANS([test_simple_6.2.xml], [pass])
+DMR_TRANS([test_simple_6.3.xml], [pass])
+
+# Test out the 'universal' tests
+DMR_TRANS_UNIVERSAL([test_array_9.xml], [pass])
+DMR_TRANS_UNIVERSAL([test_array_12.xml], [pass])
+DMR_TRANS_UNIVERSAL([test_array_13.xml], [pass])
+DMR_TRANS_UNIVERSAL([test_array_14.xml], [pass])
+
+DMR_TRANS_UNIVERSAL([test_simple_6.2.xml], [pass])
+DMR_TRANS_UNIVERSAL([test_simple_6.3.xml], [pass])
+
+DMR_INTERN([test_array_9.xml], [pass])
+DMR_INTERN([test_array_12.xml], [pass])
+DMR_INTERN([test_array_13.xml], [pass])
+DMR_INTERN([test_array_14.xml], [pass])
+
+DMR_INTERN([test_simple_6.2.xml], [pass])
+DMR_INTERN([test_simple_6.3.xml], [pass])
+
+# These tests only work for little-endian machines at this time. If baselines for
+# big-endian machines are built, this AS_IF can be removed.
+
+# Added these tests as part of https://opendap.atlassian.net/browse/HYRAX-98.
+# jhrg 4/13/16
+ 
+AS_IF([test "$WORD_ORDER" = "little-endian"],
+[
+DMR_TRANS_CE([test_array_3.1.dmr], [row;x], [test_array_3.1.dmr.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_3.1.dmr], [row=[[2:3]];x], [test_array_3.1.dmr.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_3.1.dmr], [row=[[2:3]];x[[0:1]]], [test_array_3.1.dmr.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_3.1.dmr], [x[[0:1]]], [test_array_3.1.dmr.4.trans_base], [pass])
+DMR_TRANS_CE([test_array_3.1.dmr], [x], [test_array_3.1.dmr.5.trans_base], [pass])
+],
+[])
+
+# Test various facets of the CE parser and evaluation engine
+
+DMR_TRANS_CE([test_array_4.xml], [a], [test_array_4.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_4.xml], [a[[]][[]] ], [test_array_4.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_4.xml], [/row=[[0:1]];/col=[[3]];a],  [test_array_4.xml.3.trans_base], [pass])
+    
+DMR_TRANS_CE([test_array_4.xml], [/row=[[0:1]];/col=[[3]];a[[]][[]] ],  [test_array_4.xml.4.trans_base], [pass])
+    
+DMR_TRANS_CE([test_array_4.xml], [/row=[[0:1]];/col=[[3]];a[[]][[]];b[[0]][[]];c[[0:]][[0:]] ],  [test_array_4.xml.5.trans_base], [pass])
+    
+DMR_TRANS_CE([test_array_4.xml], [x[[]][[]] ], [/test_array_4.xml.6.trans_base], [pass])
+DMR_TRANS_CE([test_array_4.xml], [/row=[[0:1]];x[[]][[]] ], [test_array_4.xml.7.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_4.xml], [c[[2:]][[2:]] ], [test_array_4.xml.8.trans_base], [pass])
+
+DMR_TRANS_CE([test_simple_6.xml], [s], [test_simple_6.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.xml], [s.i1], [test_simple_6.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.xml], [s.s], [test_simple_6.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.1.xml], [s.inner.i2], [test_simple_6.1.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_simple_6.xml], [s{i1}], [test_simple_6.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.xml], [s{s}], [test_simple_6.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.1.xml], [s{inner.i2}], [test_simple_6.1.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_simple_6.1.xml], [s{inner{i2}}], [test_simple_6.1.xml.1.trans_base], [pass])
+
+# test_array_6 holds a 2D array of Structure
+DMR_TRANS_CE([test_array_6.xml], [a], [test_array_6.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.xml], [a[[]][[]] ], [test_array_6.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.xml], [/row=[[0:1]];a[[]][[]] ], [test_array_6.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.xml], [/row=[[0:1]];a[[]][[1:2]] ], [test_array_6.xml.3.trans_base], [pass])
+
+# test_array holds a Structure that has a 2D array for a field
+DMR_TRANS_CE([test_array_6.2.xml], [a], [test_array_6.2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [a{i;j}], [test_array_6.2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [a.i], [test_array_6.2.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [a{i}], [test_array_6.2.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [a.i[[0]][[1:2]] ], [test_array_6.2.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [a{i[[0]][[1:2]]} ], [test_array_6.2.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [/row=[[0:1]];a.i[[]][[1:2]] ], [test_array_6.2.xml.4.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.2.xml], [/row=[[0:1]];a{i[[]][[1:2]]} ], [test_array_6.2.xml.4.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_6.2.xml], [a.j], [test_array_6.2.xml.5.trans_base], [pass])
+
+# test_array_6.1 is an array of Structure that holds an array and a scalar
+DMR_TRANS_CE([test_array_6.1.xml], [a], [test_array_6.1.xml.1.trans_base], [pass])
+
+# slice the structure but not the field
+DMR_TRANS_CE([test_array_6.1.xml], [/row=[[1:2]];a[[]][[0]] ], [test_array_6.1.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.1.xml], [/row=[[1:2]];a[[]][[0]]{i;j} ], [test_array_6.1.xml.2.trans_base], [pass])
+# Do we really need the FQN?
+DMR_TRANS_CE([test_array_6.1.xml], [row=[[1:2]];a[[]][[0]]{i;j} ], [test_array_6.1.xml.2.trans_base], [pass])
+
+# slice the field but not the structure
+DMR_TRANS_CE([test_array_6.1.xml], [a{i[[1:2]][[1:3]];j} ], [test_array_6.1.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_6.1.xml], [a[[]][[]]{i[[1:2]][[1:3]];j} ], [test_array_6.1.xml.3.trans_base], [pass])
+
+# slice both the structure and the array it contains using both the shared dim and 
+# a local slice for each
+DMR_TRANS_CE([test_array_6.1.xml], [/row=[[1]];a[[]][[0]]{i[[]][[0:1]]} ], [test_array_6.1.xml.4.trans_base], [pass])
+
+# Test sequences and arrays of sequences
+DMR_TRANS_CE([test_simple_7.xml], [s], [test_simple_7.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_simple_7.xml], [s{i1;s}], [test_simple_7.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_simple_7.xml], [s.i1], [test_simple_7.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_simple_7.xml], [s{i1}], [test_simple_7.xml.2.trans_base], [pass])
+
+# Modified to use elided CRC - we have tested the CRC elsewhere and in the BES
+# we remove the CRC from both the output and the baselines to avoid making baselines
+# for both big- and little-endian machines. jhrg 1/22/24
+DMR_TRANS_CE_NO_CRC([test_simple_8.xml], [outer], [test_simple_8.xml.1.trans_base], [pass])
+DMR_TRANS_CE_NO_CRC([test_simple_8.xml], [outer.s.s], [test_simple_8.xml.2.trans_base], [pass])
+DMR_TRANS_CE_NO_CRC([test_simple_8.xml], [outer{s{s}}], [test_simple_8.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.xml], [s], [test_array_7.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.xml], [s{i1;s}], [test_array_7.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.xml], [s.i1], [test_array_7.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.xml], [s{i1}], [test_array_7.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.xml], [s[[1]] ], [test_array_7.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.xml], [s[[1]]{i1;s}], [test_array_7.xml.3.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.xml], [s[[1]]{i1}], [test_array_7.xml.4.trans_base], [pass])
+
+# test_array_8 has a 2D Sequence that uses a shared dim
+DMR_TRANS_CE([test_array_8.xml], [/col=[[1:2]];s[[1]][[]]{i1}], [test_array_8.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_8.xml], [col=[[1:2]];s[[1]][[]]{i1}], [test_array_8.xml.1.trans_base], [pass])
+
+# test_array_7.1 holds a sequence that has an array for one of its fields
+DMR_TRANS_CE([test_array_7.1.xml], [], [test_array_7.1.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [s], [test_array_7.1.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.1.xml], [s.i1], [test_array_7.1.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [s.i1[[]][[]] ], [test_array_7.1.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [s{i1}], [test_array_7.1.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [s{i1[[]][[]]} ], [test_array_7.1.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.1.xml], [s.i1[[0]][[0]] ], [test_array_7.1.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [s{i1[[0]][[0]]} ], [test_array_7.1.xml.3.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.1.xml], [s.i1[[0:2]][[1:2]] ], [test_array_7.1.xml.4.trans_base], [pass])
+
+# Should this CE be supported? jhrg 12/23/13
+# DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]] ], [test_array_7.1.xml.5.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]];s ], [test_array_7.1.xml.5.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]];s.i1 ], [test_array_7.1.xml.6.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]];s.i1[[]][[]] ], [test_array_7.1.xml.6.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]];s{i1} ], [test_array_7.1.xml.6.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.1.xml], [/row=[[2:3]];/col=[[2:3]];s{i1[[]][[]]} ], [test_array_7.1.xml.6.trans_base], [pass])
+
+# test_array_7.2 is a sequence array that holds an array as one of its fields
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[]]{i1}], [test_array_7.2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[]]{i1[[]][[]]}], [test_array_7.2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s{i1[[]][[]]}], [test_array_7.2.xml.1.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[]]{i1[[0]][[]]}], [test_array_7.2.xml.2.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s{i1[[0]][[]]}], [test_array_7.2.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[0]]{i1}], [test_array_7.2.xml.3.trans_base], [pass])
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[0]]{i1[[]][[]]}], [test_array_7.2.xml.3.trans_base], [pass])
+
+DMR_TRANS_CE([test_array_7.2.xml], [/col=[[1:2]];s[[0]]{i1[[0]][[]]}], [test_array_7.2.xml.4.trans_base], [pass])
+
+#### STOPPED 7/11/25 jhrg ####
+
+# Test the function parser and evaluator. The function 'scale' is defined 
+# for both DAP2 and DAP4 in D4TestFunction.cc/h
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,1)], [], [test_array_1.xml.1.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,10)], [], [test_array_1.xml.2.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,-10)], [], [test_array_1.xml.3.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,0.001)], [], [test_array_1.xml.4.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,-0.001)], [], [test_array_1.xml.5.func_base], [pass])
+
+# Test the largest signed int64 value (it will be stored in a D4RValue that 
+# holds a Int64 variable).
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,0x7fffffffffffffff)], [], [test_array_1.xml.6.func_base], [pass])
+# This only fits in a unsigned long long (DAP4's UInt64)
+DMR_TRANS_FUNC_CE([test_array_1.xml], [scale(x,0x8fffffffffffffff)], [], [test_array_1.xml.7.func_base], [pass])
+
+# test_array_5 has 64 bit ints in c and d; a and b are Int8 and UInt8 types
+# all of these test arrays that use named dimensions
+DMR_TRANS_FUNC_CE([test_array_5.xml], [scale(a,0.001)], [], [test_array_5.xml.1.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_5.xml], [scale(b,0.001)], [], [test_array_5.xml.2.func_base], [pass])
+
+DMR_TRANS_FUNC_CE([test_array_5.xml], [scale(c,0.001)], [], [test_array_5.xml.3.func_base], [pass])
+DMR_TRANS_FUNC_CE([test_array_5.xml], [scale(d,0.001)], [], [test_array_5.xml.4.func_base], [pass])
+
+# Use the vol_1_ce_* datasets for tests
+
+# Test using variables for source values and functional composition
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(u,10)], [], [vol_1_ce_1.xml.1.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(u,v)], [], [vol_1_ce_1.xml.2.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(scale(u,10),0.01)], [], [vol_1_ce_1.xml.3.func_base], [pass])
+
+# Test name parsing for Structure members
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(Point.x,10)], [], [vol_1_ce_1.xml.4.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(Point.x,Point.y)], [], [vol_1_ce_1.xml.5.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(scale(Point.x,10),0.01)], [], [vol_1_ce_1.xml.6.func_base], [pass])
+
+# Test the 'array constant' special form (we need a dataset only because the parser needs a DMR to run)
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Byte(20:1,2,3,4),10)], [], [vol_1_ce_1.xml.7.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Int8(20:10,11,12,-9),10)], [], [vol_1_ce_1.xml.8.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$UInt16(20:1,2,3,4),10)], [], [vol_1_ce_1.xml.9.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Int16(20:1,2,3,-4),10)], [], [vol_1_ce_1.xml.10.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$UInt32(20:1,2,3,4),10)], [], [vol_1_ce_1.xml.11.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Int32(20:1,2,3,-4),10)], [], [vol_1_ce_1.xml.12.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$UInt64(20:1,2,3,0xffffffffffffffff),1)], [], [vol_1_ce_1.xml.13.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Int64(20:1,2,3,0x7fffffffffffffff),1)], [], [vol_1_ce_1.xml.14.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Float32(20:1,2,3,4.55),10)], [], [vol_1_ce_1.xml.15.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_1.xml], [scale(\$Float64(20:1,2,3,4.55),10)], [], [vol_1_ce_1.xml.16.func_base], [pass])
+
+# Test a sequence of function calls and the application of a Constraint to 
+# a function result
+DMR_TRANS_FUNC_CE([vol_1_ce_10.xml], [scale(lat,10)], [], [vol_1_ce_10.xml.1.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_10.xml], [scale(lat,10);scale(lon,10)], [], [vol_1_ce_10.xml.2.func_base], [pass])
+DMR_TRANS_FUNC_CE([vol_1_ce_10.xml], [scale(lat,10);scale(lon,10)], [lat[[10:11]][[10:11]];lon[[10:11]][[10:11]]], [vol_1_ce_10.xml.3.func_base], [pass])
+
+#### Stop here 7/13/25 ####
+
+# Tests added for the D4Sequence filter support. jhrg 4/28/16
+# These will be 'universal' tests (the idea was introduced on the 
+# master branch and tested out up above. See the calls to 
+# DMR_TRANS_UNIVERSAL jhrg 5/5/16
+
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s], [test_simple_7.xml.f.trans_base], [pass])
+
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1==1024], [test_simple_7.xml.f1.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1!=1024], [test_simple_7.xml.f2.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1<=1024], [test_simple_7.xml.f3.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1<1024], [test_simple_7.xml.f4.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1<=1024], [test_simple_7.xml.f5.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1>1024], [test_simple_7.xml.f6.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1>=1024], [test_simple_7.xml.f7.trans_base], [pass])
+
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|1024<i1], [test_simple_7.xml.f8.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|1024<=i1<=32768], [test_simple_7.xml.f9.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|i1>=1024.0], [test_simple_7.xml.fa.trans_base], [pass])
+
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s==\"Silly test string: 2\"], [test_simple_7.xml.fs1.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s!=\"Silly test string: 2\"], [test_simple_7.xml.fs2.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s<\"Silly test string: 2\"], [test_simple_7.xml.fs3.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s<=\"Silly test string: 2\"], [test_simple_7.xml.fs4.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s>\"Silly test string: 2\"], [test_simple_7.xml.fs5.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s>=\"Silly test string: 2\"], [test_simple_7.xml.fs6.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s|s~=\".*2\"], [test_simple_7.xml.fs7.trans_base], [pass])
+
+# Test filtering a sequence that has only one field projected, including filtering on the values
+# of a filed not projected.
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s{i1}|i1<32768], [test_simple_7.xml.g1.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_7.xml], [s{i1}|s<=\"Silly test string: 2\"], [test_simple_7.xml.g1.trans_base], [pass])
+
+# A nested sequence with flots in the outer sequence and the int, string combination in the inner
+DMR_TRANS_SERIES_CE([test_simple_8.1.xml], [outer], [test_simple_8.1.xml.f1.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_8.1.xml], [outer{x;y}], [test_simple_8.1.xml.f2.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_8.1.xml], [outer{x;y;inner}], [test_simple_8.1.xml.f3.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_8.1.xml], [outer{x;y;inner|i1<1000}], [test_simple_8.1.xml.f4.trans_base], [pass])
+DMR_TRANS_SERIES_CE([test_simple_8.1.xml], [outer{x;y;inner|i1<1000}|x<0.0], [test_simple_8.1.xml.f5.trans_base], [pass])
+
+# These tests are regression tests for bug Hyrax-267. Spaces in variables names
+# broke the DAP4 CE parser
+
+# These mostly fail because thee's a second bug where the variables in a group are 
+# not printing values. 
+DMR_TRANS_SERIES_CE([names_with_spaces.dmr], [/u], [names_with_spaces.dmr.1.trans_base], [pass])
+DMR_TRANS_SERIES_CE([names_with_spaces.dmr], [/inst2/u], [names_with_spaces.dmr.2.trans_base], [xfail])
+DMR_TRANS_SERIES_CE([names_with_spaces.dmr], [/inst2/Point.x], [names_with_spaces.dmr.3.trans_base], [xfail])
+
+DMR_TRANS_SERIES_CE([names_with_spaces2.dmr], [/inst2/\"Point Break\".x], [names_with_spaces2.dmr.1.trans_base], [xfail])
+DMR_TRANS_SERIES_CE([names_with_spaces2.dmr], [/inst2/Point%20Break.x], [names_with_spaces2.dmr.1.trans_base], [xfail])
+DMR_TRANS_SERIES_CE([names_with_spaces2.dmr], [/inst2/\"Point%20Break\".x], [names_with_spaces2.dmr.1.trans_base], [xfail])
+
+DMR_TRANS_SERIES_CE([names_with_spaces3.dmr], [/inst2/\"New Group\"/x], [names_with_spaces3.dmr.1.trans_base], [xfail])
+DMR_TRANS_SERIES_CE([names_with_spaces3.dmr], [/inst2/New%20Group/x], [names_with_spaces3.dmr.1.trans_base], [xfail])
+
+# Test DAP CE parse errors - ensure they don't leak the supplied
+# CE text into the error message. jhrg 4/15/20
+DMR_PARSE_CE([test_simple_1.xml], [nasty], [test_simple_1.xml.parse_ce_1])
+# This string is 'd1rox<script>alert(1)</script>d55je=1' (%25 --> '%')
+# That is, the % is escaped in this text: %253c --> %3c --> '<'
+DMR_PARSE_CE([test_simple_1.xml], [d1rox%253cscript%253ealert%25281%2529%253c%252fscript%253ed55je=1],
+    [test_simple_1.xml.parse_ce_2])
+
+DMR_PARSE_CE([test_simple_6.3.xml], [s.nasty], [test_simple_6.3.xml.parse_ce_1])
+DMR_PARSE_CE([test_simple_6.3.xml], [s.d1rox%253cscript%253ealert%25281%2529%253c%252fscript%253ed55je=1],
+    [test_simple_6.3.xml.parse_ce_2])
+
+DMR_PARSE_CE([vol_1_ce_12.xml], [temp[[nasty]]], [vol_1_ce_12.xml.parse_ce_1])
+DMR_PARSE_CE([vol_1_ce_12.xml], [temp[[d1rox%253cscript%253ealert%25281%2529%253c%252fscript%253ed55je=1]]],
+    [vol_1_ce_12.xml.parse_ce_2])
+
+# Test reversed array indices
+DMR_PARSE_CE([test_array_4.xml], [b[[2:1]][[2:3]] ], [test_array_4.xml.error.base], [pass])
+
+# Test projections that only name groups
+DMR_TRANS_CE([vol_1_ce_2.xml], [/inst2], [vol_1_ce_2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([vol_1_ce_2.xml], [inst2], [vol_1_ce_2.xml.1.trans_base], [pass])
+DMR_TRANS_CE([vol_1_ce_2.xml], [/inst2/Point], [vol_1_ce_2.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([vol_1_ce_13.xml], [/inst2], [vol_1_ce_13.xml.1.trans_base], [pass])
+DMR_TRANS_CE([vol_1_ce_13.xml], [/inst2/inst3], [vol_1_ce_13.xml.2.trans_base], [pass])
+
+DMR_TRANS_CE([vol_1_ce_13.xml], [/attr_only_global], [vol_1_ce_13.xml.3.trans_base], [pass])
+DMR_TRANS_CE([vol_1_ce_13.xml], [/inst2/attr_only], [vol_1_ce_13.xml.4.trans_base], [pass])

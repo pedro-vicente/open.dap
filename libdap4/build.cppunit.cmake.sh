@@ -10,7 +10,7 @@ else
     echo "cppunit-1.15.1 already exists in ../ext/"
 fi
 
-# build cppunit 
+# build cppunit
 mkdir -p ../build/cppunit-1.15.1
 pushd ../build
 pushd cppunit-1.15.1
@@ -19,5 +19,5 @@ cmake ../../ext/cppunit-1.15.1 \
   --fresh
 cmake --build . --config Debug --parallel
 cmake --install . --config Debug
-popd 
+popd
 popd
